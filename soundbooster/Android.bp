@@ -5,6 +5,11 @@
 
 cc_library_shared {
     name: "libsamsungSoundbooster_plus",
+    // CYG1 tablet userspace supplies its own effect implementation.
+    enabled: select(soong_config_variable("android_hardware_audio", "gts9u_speaker_dolby"), {
+        true: false,
+        default: true,
+    }),
     vendor: true,
     soc_specific: true,
     relative_install_path: "soundfx",

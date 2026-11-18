@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <mutex>
+
 #include <aidl/android/hardware/biometrics/fingerprint/BnSession.h>
 #include <aidl/android/hardware/biometrics/fingerprint/ISessionCallback.h>
 
@@ -73,6 +75,7 @@ class Session : public BnSession {
   private:
     LegacyHAL mHal;
     LockoutTracker mLockoutTracker;
+    std::mutex mMaskMutex;
     bool mMaskEnabled = false;
     void setMaskEnabled(bool enabled);
     bool mClosed = false;

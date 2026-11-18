@@ -80,6 +80,7 @@ void onClientDeath(void* cookie) {
 }
 
 void Session::setMaskEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(mMaskMutex);
     if (mMaskEnabled == enabled) return;
     auto path = FingerprintHalProperties::mask_control_path();
     if (!path.has_value() || path->empty()) return;
