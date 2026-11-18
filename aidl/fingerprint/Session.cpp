@@ -330,6 +330,7 @@ ndk::ScopedAStatus Session::onContextChanged(const OperationContext& context) {
 }
 
 ndk::ScopedAStatus Session::onPointerCancelWithContext(const PointerContext& /*context*/) {
+    setMaskEnabled(false);
     return ndk::ScopedAStatus::ok();
 }
 
@@ -492,12 +493,11 @@ void Session::notify(const fingerprint_msg_t* msg) {
             LOG(DEBUG) << "onEnrollResult(fid=" << msg->data.enroll.finger.fid
                        << ", gid=" << msg->data.enroll.finger.gid
                        << ", rem=" << msg->data.enroll.samples_remaining << ")";
-            mCb->onEnrollmentProgress(msg->data.enroll.finger.fid,
-                                      msg->data.enroll.samples_remaining);
             if (msg->data.enroll.samples_remaining == 0) {
-
                 setMaskEnabled(false);
             }
+            mCb->onEnrollmentProgress(msg->data.enroll.finger.fid,
+                                      msg->data.enroll.samples_remaining);
             break;
         case FINGERPRINT_TEMPLATE_REMOVED: {
             LOG(DEBUG) << "onRemove(fid=" << msg->data.removed.finger.fid
@@ -515,6 +515,8 @@ void Session::notify(const fingerprint_msg_t* msg) {
                 HardwareAuthToken authToken;
                 translate(hat, authToken);
 
+                // The prompt can disappear before the framework sends a pointer-up event.
+                setMaskEnabled(false);
                 mCb->onAuthenticationSucceeded(msg->data.authenticated.finger.fid, authToken);
                 mLockoutTracker.reset(true);
             } else {
