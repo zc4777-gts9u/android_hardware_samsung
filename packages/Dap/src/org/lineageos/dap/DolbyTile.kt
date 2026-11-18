@@ -18,8 +18,6 @@ package org.lineageos.dap
 
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import androidx.preference.PreferenceManager
-import org.lineageos.dap.DolbyFragment.Companion.PREF_DOLBY_ENABLE
 
 class DolbyTile : TileService() {
     private var isEnabled = false
@@ -32,15 +30,12 @@ class DolbyTile : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
-        isEnabled = DolbyCore.isEnabled()
+        DolbyCore.initialize(this)
+        isEnabled = DolbyCore.isEnabled(this)
     }
 
     override fun onClick() {
-        isEnabled = !isEnabled
-        DolbyCore.setEnabled(isEnabled)
-        PreferenceManager.getDefaultSharedPreferences(this)
-            .edit()
-            .putBoolean(PREF_DOLBY_ENABLE, isEnabled)
-            .commit()
+        DolbyCore.setEnabled(this, !DolbyCore.isEnabled(this))
+        isEnabled = DolbyCore.isEnabled(this)
     }
 }

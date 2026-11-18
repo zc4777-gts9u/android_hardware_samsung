@@ -19,20 +19,11 @@ package org.lineageos.dap
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import androidx.preference.PreferenceManager
-import org.lineageos.dap.DolbyFragment.Companion.PREF_DOLBY_ENABLE
-import org.lineageos.dap.DolbyFragment.Companion.PREF_DOLBY_MODES
 
 class BootCompletedReceiver : BroadcastReceiver() {
-
     override fun onReceive(context: Context, intent: Intent) {
-        val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context)
-        for ((key, value) in PREF_DOLBY_MODES) {
-            if (sharedPrefs.getBoolean(key, false)) {
-                DolbyCore.setProfile(value)
-                break
-            }
+        if (intent.action == Intent.ACTION_LOCKED_BOOT_COMPLETED) {
+            DolbyCore.initialize(context)
         }
-        DolbyCore.setEnabled(sharedPrefs.getBoolean(PREF_DOLBY_ENABLE, false))
     }
 }

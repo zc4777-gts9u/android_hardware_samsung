@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2021-2026 The LineageOS Project
+ * SPDX-FileCopyrightText: 2021-2022 The LineageOS Project
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -11,8 +11,8 @@ public class MotionEvent {
     private final short mDx;
     private final short mDy;
 
-    private static short extractShortValue(byte[] data, int index) {
-        return (short) ((data[index] & 0xFF) | ((data[index + 1] & 0xFF) << 8));
+    private static short extractShortValue(byte[] bArr, int i) {
+        return (short) ((bArr[i] & 255) | ((bArr[i + 1] & 255) << 8));
     }
 
     private MotionEvent(Action action, short dx, short dy) {
@@ -37,19 +37,14 @@ public class MotionEvent {
         return mDy;
     }
 
-    public static MotionEvent fromData(byte[] data, int offset) {
-        if (data == null || data.length < offset + 5) {
-            return null;
+    public static MotionEvent fromTypeData(int type, byte[] value) {
+        switch (type) {
+            case 15:
+                return new MotionEvent(Action.MOVE,
+                        extractShortValue(value, 1),
+                        extractShortValue(value, 3));
+            default:
+                return null;
         }
-
-        int type = data[offset] & 0xFF;
-        if (type != 0x0F) {
-            return null;
-        }
-
-        short dx = extractShortValue(data, offset + 1);
-        short dy = extractShortValue(data, offset + 3);
-
-        return new MotionEvent(Action.MOVE, dx, dy);
     }
 }

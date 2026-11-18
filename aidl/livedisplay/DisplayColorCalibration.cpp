@@ -8,9 +8,9 @@
 #include <livedisplay/samsung/DisplayColorCalibration.h>
 
 #include <fstream>
+#include <sstream>
 
 using android::base::ReadFileToString;
-using android::base::Split;
 using android::base::Trim;
 using android::base::WriteStringToFile;
 
@@ -43,10 +43,12 @@ ndk::ScopedAStatus DisplayColorCalibration::getCalibration(std::vector<int32_t>*
     std::string tmp;
 
     if (ReadFileToString(kRGBPath, &tmp)) {
-        std::vector<std::string> colors = Split(Trim(tmp), " ");
-        for (const std::string& color : colors) {
-            rgb.push_back(std::stoi(color));
+        std::istringstream values(tmp);
+        int32_t red, green, blue;
+        if (!(values >> red >> green >> blue) || !(values >> std::ws).eof()) {
+            return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
         }
+        rgb = {red, green, blue};
     } else {
         return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <!-- A negative value leaves the effect's speaker auxiliary gain at its default. -->
+    <integer name="config_dolbySpeakerAuxGainQ24">-1</integer>
+    <!-- Keep stream attenuation after Dolby on built-in speakers. -->
+    <bool name="config_dolbySpeakerPostVolume">false</bool>
+    <bool name="config_dolbySpeakerHal">false</bool>
+</resources>

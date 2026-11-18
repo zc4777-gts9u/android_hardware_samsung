@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2022-2026 The LineageOS Project
+ * SPDX-FileCopyrightText: 2022 The LineageOS Project
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -22,9 +22,10 @@ import android.os.ServiceManager;
 import android.os.UserHandle;
 import android.util.Log;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+
+import org.lineageos.spenactions.settings.SettingsUtils;
 
 import vendor.samsung.hardware.spen.ISPen;
 
@@ -32,13 +33,21 @@ public class BluetoothUtils {
 
     private static final String LOG_TAG = "SPenActions/BluetoothUtils";
 
+    private static ScanCallback sResetCallback;
+
     public static void resetSPenMAC(Context context) {
         ISPen hal = ISPen.Stub.asInterface(ServiceManager.waitForDeclaredService(
                 ISPen.DESCRIPTOR + "/default"));
 
         BluetoothAdapter btAdapter = context.getSystemService(BluetoothManager.class).getAdapter();
-        if (!btAdapter.isEnabled())
+        if (!btAdapter.isEnabled() || !SettingsUtils.isSPenBluetoothEnabled(context)) {
             return;
+        }
+        BluetoothLeScanner scanner = btAdapter.getBluetoothLeScanner();
+        if (scanner == null) {
+            return;
+        }
+        cancelSPenReset(context);
 
         try {
             // Toggle charging to make pen discoverable for a few seconds
@@ -48,35 +57,51 @@ public class BluetoothUtils {
             ex.printStackTrace();
         }
 
-        BluetoothLeScanner scanner = btAdapter.getBluetoothLeScanner();
         ScanCallback callback = new ScanCallback() {
             @Override
             public void onScanResult(int callbackType, ScanResult result) {
+                if (sResetCallback != this || !SettingsUtils.isSPenBluetoothEnabled(context)) {
+                    return;
+                }
+                cancelSPenReset(context);
                 Log.i(LOG_TAG, result.getDevice().getName() + " RSSI: " + result.getRssi());
                 try {
                     hal.setMACAddress(result.getDevice().getAddress());
                 } catch (RemoteException ex) {
                     ex.printStackTrace();
                 }
-                scanner.stopScan(this);
                 // Simulate Bluetooth switch off/on to apply the new MAC
                 simulateReconnection(context);
             }
         };
-        List<ScanFilter> filters = new ArrayList<>();
-        for (UUID uuid : SPenIdentity.getServiceUUIDs()) {
-            filters.add(new ScanFilter.Builder()
-                    .setServiceUuid(new ParcelUuid(uuid))
-                    .build());
-        }
+        ScanFilter filter = new ScanFilter.Builder()
+                .setServiceUuid(new ParcelUuid(UUID.fromString(
+                        context.getResources().getString(R.string.config_sPenServiceUuid))))
+                .build();
         ScanSettings settings = new ScanSettings.Builder()
                 .setCallbackType(ScanSettings.CALLBACK_TYPE_FIRST_MATCH)
                 .build();
 
-        scanner.startScan(filters, settings, callback);
+        sResetCallback = callback;
+        scanner.startScan(List.of(filter), settings, callback);
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            scanner.stopScan(callback);
-        }, 60 * 1000); // Cancel scan after 60s
+            if (sResetCallback == callback) {
+                cancelSPenReset(context);
+            }
+        }, 60_000);
+    }
+
+    static void cancelSPenReset(Context context) {
+        ScanCallback callback = sResetCallback;
+        sResetCallback = null;
+        if (callback != null) {
+            BluetoothAdapter btAdapter = context.getSystemService(BluetoothManager.class)
+                    .getAdapter();
+            BluetoothLeScanner scanner = btAdapter.getBluetoothLeScanner();
+            if (scanner != null && btAdapter.isEnabled()) {
+                scanner.stopScan(callback);
+            }
+        }
     }
 
     public static void simulateReconnection(Context context) {

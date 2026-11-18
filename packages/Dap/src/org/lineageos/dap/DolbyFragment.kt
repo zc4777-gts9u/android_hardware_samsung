@@ -31,10 +31,15 @@ class DolbyFragment : SettingsBasePreferenceFragment(), Preference.OnPreferenceC
 
         switchBar = findPreference<MainSwitchPreference>(PREF_DOLBY_ENABLE)!!
         switchBar.onPreferenceChangeListener = this
-        switchBar.isChecked = DolbyCore.isEnabled()
+        DolbyCore.initialize(requireContext())
+        switchBar.isChecked = DolbyCore.isEnabled(requireContext())
+        val game = findPreference<Preference>(PREF_DOLBY_GAME)!!
+        game.isVisible = !resources.getBoolean(R.bool.config_dolbySpeakerHal)
+        game.onPreferenceChangeListener = this
 
         for ((key, value) in PREF_DOLBY_MODES) {
             val preference = findPreference<SelectorWithWidgetPreference>(key)!!
+            preference.isChecked = value == DolbyCore.getProfile(requireContext())
             preference.setOnPreferenceClickListener {
                 setProfile(value)
                 true
@@ -44,13 +49,15 @@ class DolbyFragment : SettingsBasePreferenceFragment(), Preference.OnPreferenceC
 
     override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
         if (preference == switchBar) {
-            DolbyCore.setEnabled(newValue as Boolean)
+            DolbyCore.setEnabled(requireContext(), newValue as Boolean)
+        } else if (preference.key == PREF_DOLBY_GAME) {
+            DolbyCore.setGameEnabled(requireContext(), newValue as Boolean)
         }
         return true
     }
 
     private fun setProfile(profile: Int) {
-        DolbyCore.setProfile(profile)
+        DolbyCore.setProfile(requireContext(), profile)
 
         for ((key, value) in PREF_DOLBY_MODES) {
             val preference = findPreference<SelectorWithWidgetPreference>(key)!!
@@ -60,18 +67,12 @@ class DolbyFragment : SettingsBasePreferenceFragment(), Preference.OnPreferenceC
 
     companion object {
         const val PREF_DOLBY_ENABLE = "dolby_enable"
-
-        val PREF_DOLBY_MODES =
-            mapOf(
-                "dolby_profile_auto" to DolbyCore.PROFILE_AUTO,
-                "dolby_profile_movie" to DolbyCore.PROFILE_MOVIE,
-                "dolby_profile_music" to DolbyCore.PROFILE_MUSIC,
-                "dolby_profile_voice" to DolbyCore.PROFILE_VOICE,
-                "dolby_profile_game" to DolbyCore.PROFILE_GAME,
-                "dolby_profile_off" to DolbyCore.PROFILE_OFF,
-                "dolby_profile_game_1" to DolbyCore.PROFILE_GAME_1,
-                "dolby_profile_game_2" to DolbyCore.PROFILE_GAME_2,
-                "dolby_profile_spacial_audio" to DolbyCore.PROFILE_SPACIAL_AUDIO,
-            )
+        const val PREF_DOLBY_GAME = "dolby_game"
+        val PREF_DOLBY_MODES = mapOf(
+            "dolby_profile_auto" to 0,
+            "dolby_profile_movie" to 1,
+            "dolby_profile_music" to 2,
+            "dolby_profile_voice" to 3,
+        )
     }
 }

@@ -94,3 +94,12 @@ prop {
     access: Readonly
     api_name: "mask_brightness_path"
 }
+
+# Optional kernel-owned optical fingerprint mask, used by SM-X910.
+prop {
+    api_name: "mask_control_path"
+    type: String
+    scope: Internal
+    access: Readonly
+    prop_name: "ro.vendor.fingerprint.mask_control_path"
+}

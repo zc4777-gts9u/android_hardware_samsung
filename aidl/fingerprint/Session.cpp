@@ -12,6 +12,7 @@
 #include <fingerprint.sysprop.h>
 
 #include <android-base/logging.h>
+#include <android-base/file.h>
 
 #include <dirent.h>
 #include <endian.h>
@@ -76,6 +77,17 @@ void onClientDeath(void* cookie) {
     if (session && !session->isClosed()) {
         session->close();
     }
+}
+
+void Session::setMaskEnabled(bool enabled) {
+    if (mMaskEnabled == enabled) return;
+    auto path = FingerprintHalProperties::mask_control_path();
+    if (!path.has_value() || path->empty()) return;
+    if (!::android::base::WriteStringToFile(enabled ? "1" : "0", *path)) {
+        PLOG(ERROR) << "Failed to update fingerprint mask at " << *path;
+        return;
+    }
+    mMaskEnabled = enabled;
 }
 
 Session::Session(LegacyHAL hal, int userId, std::shared_ptr<ISessionCallback> cb,
@@ -232,6 +244,7 @@ ndk::ScopedAStatus Session::resetLockout(const HardwareAuthToken& /*hat*/) {
 }
 
 ndk::ScopedAStatus Session::close() {
+    setMaskEnabled(false);
     LOG(INFO) << "close";
     mClosed = true;
     mCb->onSessionClosed();
@@ -242,6 +255,9 @@ ndk::ScopedAStatus Session::close() {
 ndk::ScopedAStatus Session::onPointerDown(int32_t /*pointerId*/, int32_t /*x*/, int32_t /*y*/,
                                           float /*minor*/, float /*major*/) {
     LOG(INFO) << "onPointerDown";
+
+    setMaskEnabled(true);
+
 
     if (FingerprintHalProperties::request_touch_event().value_or(false)) {
         waitForMaskBrightness();
@@ -255,6 +271,9 @@ ndk::ScopedAStatus Session::onPointerDown(int32_t /*pointerId*/, int32_t /*x*/, 
 
 ndk::ScopedAStatus Session::onPointerUp(int32_t /*pointerId*/) {
     LOG(INFO) << "onPointerUp";
+
+    setMaskEnabled(false);
+
 
     if (FingerprintHalProperties::request_touch_event().value_or(false)) {
         mHal.request(SEM_REQUEST_TOUCH_EVENT, 1);
@@ -318,6 +337,7 @@ ndk::ScopedAStatus Session::setIgnoreDisplayTouches(bool /*shouldIgnore*/) {
 }
 
 ndk::ScopedAStatus Session::cancel() {
+    setMaskEnabled(false);
     int32_t ret = mHal.ss_fingerprint_cancel();
 
     if (ret == 0) {
@@ -447,6 +467,8 @@ void Session::notify(const fingerprint_msg_t* msg) {
             int32_t vendorCode = 0;
             Error result = VendorErrorFilter(msg->data.error, &vendorCode);
             LOG(DEBUG) << "onError(" << static_cast<int>(result) << ")";
+
+            setMaskEnabled(false);
             mCb->onError(result, vendorCode);
         } break;
         case FINGERPRINT_ACQUIRED: {
@@ -471,6 +493,10 @@ void Session::notify(const fingerprint_msg_t* msg) {
                        << ", rem=" << msg->data.enroll.samples_remaining << ")";
             mCb->onEnrollmentProgress(msg->data.enroll.finger.fid,
                                       msg->data.enroll.samples_remaining);
+            if (msg->data.enroll.samples_remaining == 0) {
+
+                setMaskEnabled(false);
+            }
             break;
         case FINGERPRINT_TEMPLATE_REMOVED: {
             LOG(DEBUG) << "onRemove(fid=" << msg->data.removed.finger.fid

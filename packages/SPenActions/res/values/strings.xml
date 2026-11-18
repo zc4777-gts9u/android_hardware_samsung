@@ -17,5 +17,10 @@
     <string name="spen_mode_camera">Camera control</string>
     <string name="spen_mode_media_control">Media control</string>
 
+    <string name="spen_battery_title">S Pen battery</string>
+    <string name="spen_battery_not_connected">Not connected</string>
+    <string name="spen_battery_level">%1$d%%</string>
+    <string name="spen_battery_level_charging">%1$d%% (Charging)</string>
+
     <string name="spen_reset">Reset S Pen</string>
 </resources>

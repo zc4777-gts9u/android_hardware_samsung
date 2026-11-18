@@ -30,14 +30,18 @@ bool SunlightEnhancement::isSupported() {
 // Methods from ::aidl::vendor::lineage::livedisplay::BnSunlightEnhancement follow.
 ndk::ScopedAStatus SunlightEnhancement::getEnabled(bool* _aidl_return) {
     std::string tmp;
-    int32_t contents = 0;
 
     if (!ReadFileToString(kSREPath, &tmp)) {
         return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }
-    contents = std::stoi(Trim(tmp));
-
-    *_aidl_return = contents == 1;
+    const std::string value = Trim(tmp);
+    if (value == "1" || value == "Current outdoor Mode: OUTDOOR_ON_MODE") {
+        *_aidl_return = true;
+    } else if (value == "0" || value == "Current outdoor Mode: OUTDOOR_OFF_MODE") {
+        *_aidl_return = false;
+    } else {
+        return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
+    }
     return ndk::ScopedAStatus::ok();
 }
 

@@ -21,6 +21,8 @@
     android:versionName="1.0">
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_ROUTING" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <application
         android:defaultToDeviceProtectedStorage="true"
@@ -43,7 +45,10 @@
                 android:value="com.android.settings.category.ia.sound" />
             <meta-data
                 android:name="com.android.settings.group_key"
-                android:value="system_sounds_and_vibrations_category" />
+                android:value="audio_category" />
+            <meta-data
+                android:name="com.android.settings.order"
+                android:value="-106" />
         </activity>
 
         <provider

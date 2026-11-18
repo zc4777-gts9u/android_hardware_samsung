@@ -11,7 +11,7 @@ import com.android.settingslib.collapsingtoolbar.CollapsingToolbarBaseActivity;
 
 public class SettingsActivity extends CollapsingToolbarBaseActivity {
 
-    private static final String TAG = "SPenActions";
+    private static final String TAG = "spenactions";
 
     @Override
     public void onCreate(Bundle savedInstanceState) {

@@ -10,10 +10,13 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.os.RemoteException;
+import android.util.Log;
 
 import org.lineageos.spenactions.settings.SettingsUtils;
 
 public class BluetoothReceiver extends BroadcastReceiver {
+
+    private static final String TAG = "SPenActions/BluetoothReceiver";
 
     private final SPenConnectionManager mConnectionManager;
 
@@ -23,11 +26,13 @@ public class BluetoothReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        try {
-            int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1);
+        onBluetoothStateChanged(context, intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1));
+    }
 
+    void onBluetoothStateChanged(Context context, int state) {
+        try {
             if (state == BluetoothAdapter.STATE_ON) {
-                if (SettingsUtils.isEnabled(context, SettingsUtils.SPEN_BLUETOOTH_ENABLE, false)) {
+                if (SettingsUtils.isSPenBluetoothEnabled(context)) {
                     mConnectionManager.disconnect();
                     mConnectionManager.connect();
                 }
@@ -35,7 +40,15 @@ public class BluetoothReceiver extends BroadcastReceiver {
                 mConnectionManager.disconnect();
             }
         } catch (RemoteException ex) {
-            ex.printStackTrace();
+            Log.e(TAG, "Failed to apply Bluetooth state for S Pen", ex);
+        }
+    }
+
+    void close() {
+        try {
+            mConnectionManager.close();
+        } catch (RemoteException ex) {
+            Log.e(TAG, "Failed to disconnect S Pen", ex);
         }
     }
 }

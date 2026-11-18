@@ -11,4 +11,5 @@
     <string name="dolby_profile_off">没有配置文件</string>
     <string name="dolby_profile_spacial_audio">空间音频</string>
     <string name="dolby_profile_voice">语音</string>
+    <string name="dolby_for_gaming">游戏杜比全景声</string>
 </resources>

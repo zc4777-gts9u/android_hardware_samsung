@@ -11,12 +11,15 @@ import android.bluetooth.BluetoothManager;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.IBinder;
-import android.os.UserHandle;
 import android.util.Log;
+
+import org.lineageos.spenactions.settings.SettingsUtils;
 
 public class SPenActionsService extends Service {
 
     private static final String LOG_TAG = "SPenActions/Service";
+
+    private BluetoothReceiver mBluetoothReceiver;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -25,31 +28,30 @@ public class SPenActionsService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.d(LOG_TAG, "Service started");
+        if (!SettingsUtils.isSPenBluetoothEnabled(this)) {
+            stopSelf(startId);
+            return START_NOT_STICKY;
+        }
 
-        BluetoothAdapter btAdapter = getSystemService(BluetoothManager.class).getAdapter();
+        if (mBluetoothReceiver == null) {
+            Log.d(LOG_TAG, "Service started");
+            BluetoothAdapter btAdapter = getSystemService(BluetoothManager.class).getAdapter();
+            mBluetoothReceiver = new BluetoothReceiver(this);
+            registerReceiver(mBluetoothReceiver,
+                    new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED));
+            mBluetoothReceiver.onBluetoothStateChanged(this, btAdapter.getState());
+        }
 
-        IntentFilter btFilter = new IntentFilter();
-        btFilter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
-        registerReceiver(new BluetoothReceiver(this), btFilter);
-
-        // Just started - manually send current bluetooth state
-        Intent btState = new Intent(BluetoothAdapter.ACTION_STATE_CHANGED);
-        btState.setPackage(getPackageName());
-        btState.putExtra(BluetoothAdapter.EXTRA_STATE, btAdapter.getState());
-        sendBroadcastAsUser(btState, UserHandle.CURRENT);
-
-        return super.onStartCommand(intent, flags, startId);
+        return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
-        Log.d(LOG_TAG, "Service stopping");
-
-        // Force stop by faking bluetooth turn off
-        Intent btState = new Intent(BluetoothAdapter.ACTION_STATE_CHANGED);
-        btState.setPackage(getPackageName());
-        btState.putExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.STATE_OFF);
-        sendBroadcastAsUser(btState, UserHandle.CURRENT);
+        if (mBluetoothReceiver != null) {
+            Log.d(LOG_TAG, "Service stopping");
+            unregisterReceiver(mBluetoothReceiver);
+            mBluetoothReceiver.close();
+        }
+        super.onDestroy();
     }
 }

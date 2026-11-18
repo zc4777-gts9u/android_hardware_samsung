@@ -16,6 +16,8 @@
  */
 
 #include <android-base/logging.h>
+#include <android-base/properties.h>
+#include <unistd.h>
 #include <android/binder_interface_utils.h>
 #include <health-impl/Health.h>
 #include <health/utils.h>
@@ -49,6 +51,38 @@ class ChargerCallbackImpl : public ChargerCallback {
 }  // namespace aidl::android::hardware::health
 #endif
 
+namespace {
+
+void useBatteryPathIfReadable(android::String8& path, const char* candidate) {
+    if (access(candidate, R_OK) == 0) {
+        path = candidate;
+    }
+}
+
+class SamsungHealth : public Health {
+  public:
+    SamsungHealth(std::string_view instanceName, std::unique_ptr<healthd_config> config,
+                  bool isGts9uWifi)
+        : Health(instanceName, std::move(config)), isGts9uWifi_(isGts9uWifi) {}
+
+  protected:
+    void UpdateHealthInfo(aidl::android::hardware::health::HealthInfo* info) override {
+        if (isGts9uWifi_ && info->batteryPresent) {
+            // SM-X910 CYG1 power profile: rated minimum 10880 mAh, typical 11200 mAh.
+            // The legacy driver exposes a fixed capacity, so use the rated value
+            // as its nominal full-charge fallback.
+            constexpr int32_t kRatedCapacityUah = 10880000;
+            info->batteryFullChargeDesignCapacityUah = kRatedCapacityUah;
+            info->batteryFullChargeUah = kRatedCapacityUah;
+        }
+    }
+
+  private:
+    const bool isGts9uWifi_;
+};
+
+}  // namespace
+
 int main(int argc, char** argv) {
 #ifdef __ANDROID_RECOVERY__
     android::base::InitLogging(argv, android::base::KernelLogger);
@@ -57,7 +91,21 @@ int main(int argc, char** argv) {
     // make a default health service
     auto config = std::make_unique<healthd_config>();
     ::android::hardware::health::InitHealthdConfig(config.get());
-    auto binder = ndk::SharedRefBase::make<Health>(gInstanceName, std::move(config));
+    const bool isGts9uWifi =
+            android::base::GetProperty("ro.product.vendor.device", "") == "gts9uwifi";
+    if (isGts9uWifi) {
+        // The legacy current_now/current_avg properties return mA on this device.
+        useBatteryPathIfReadable(config->batteryCurrentNowPath,
+                                 "/sys/class/power_supply/battery/batt_current_ua_now");
+        useBatteryPathIfReadable(config->batteryCurrentAvgPath,
+                                 "/sys/class/power_supply/battery/batt_current_ua_avg");
+        useBatteryPathIfReadable(config->batteryCycleCountPath,
+                                 "/sys/class/power_supply/battery/fg_cycle");
+        useBatteryPathIfReadable(config->batteryStateOfHealthPath,
+                                 "/sys/class/power_supply/battery/fg_asoc");
+    }
+    auto binder =
+            ndk::SharedRefBase::make<SamsungHealth>(gInstanceName, std::move(config), isGts9uWifi);
 
     if (argc >= 2 && argv[1] == gChargerArg) {
 #if !CHARGER_FORCE_NO_UI

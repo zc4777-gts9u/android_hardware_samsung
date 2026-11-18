@@ -73,6 +73,8 @@ class Session : public BnSession {
   private:
     LegacyHAL mHal;
     LockoutTracker mLockoutTracker;
+    bool mMaskEnabled = false;
+    void setMaskEnabled(bool enabled);
     bool mClosed = false;
     bool mCaptureReady = false;
 

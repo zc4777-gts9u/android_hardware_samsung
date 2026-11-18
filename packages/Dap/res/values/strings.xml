@@ -19,4 +19,5 @@
     <string name="dolby_profile_off">No profile</string>
     <string name="dolby_profile_spacial_audio">Spacial audio</string>
     <string name="dolby_profile_voice">Voice</string>
+    <string name="dolby_for_gaming">Dolby Atmos for gaming</string>
 </resources>

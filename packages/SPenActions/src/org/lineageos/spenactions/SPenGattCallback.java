@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2021-2026 The LineageOS Project
+ * SPDX-FileCopyrightText: 2021-2025 The LineageOS Project
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -12,6 +12,7 @@ import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
+import android.content.Intent;
 import android.hardware.input.InputManager;
 import android.os.RemoteException;
 import android.os.SystemClock;
@@ -24,16 +25,12 @@ import android.view.KeyEvent;
 import org.lineageos.spenactions.settings.SettingsUtils;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
 public class SPenGattCallback extends BluetoothGattCallback {
 
     private static final String LOG_TAG = "SPenActions/SPenGattCallback";
-    private static final boolean DEBUG = false;
-
-    private static final int MOTION_THRESHOLD = 100;
 
     // GATT characteristics UUIDs
     private static final UUID BATTERY_LEVEL = UUID.fromString("5a87b4ef-3bfa-76a8-e642-92933c31434f");
@@ -47,34 +44,54 @@ public class SPenGattCallback extends BluetoothGattCallback {
 
     private final Context mContext;
     private final SPenConnectionManager mConnectionManager;
-    private final List<UUID> mEnableCharacteristics = new ArrayList<>();
-
-    private UUID mServiceUUID;
+    private final List<UUID> mEnableCharacteristics;
+    private final UUID mServiceUUID;
 
     private boolean mButtonHadGesture = false;
     private long mButtonDownTime = 0;
+    private boolean mCharging = false;
 
     public SPenGattCallback(SPenConnectionManager connectionManager, Context context) {
         mConnectionManager = connectionManager;
         mContext = context;
 
+        mEnableCharacteristics = new ArrayList<>();
         mEnableCharacteristics.add(BATTERY_LEVEL);
+        mEnableCharacteristics.add(CHARGE_STATUS);
         mEnableCharacteristics.add(BUTTON_EVENT);
+
+        mServiceUUID = UUID.fromString(
+                context.getResources().getString(R.string.config_sPenServiceUuid));
+    }
+
+    private void reportBatteryState(int level, boolean charging) {
+        SettingsUtils.setIntPreference(mContext, SettingsUtils.SPEN_BATTERY_VALUE, level);
+        SettingsUtils.setBooleanPreference(mContext, SettingsUtils.SPEN_BATTERY_CHARGING, charging);
+
+        Intent intent = new Intent(SettingsUtils.ACTION_SPEN_BATTERY_CHANGED);
+        intent.setPackage(mContext.getPackageName());
+        intent.putExtra(SettingsUtils.EXTRA_BATTERY_LEVEL, level);
+        intent.putExtra(SettingsUtils.EXTRA_BATTERY_CHARGING, charging);
+        mContext.sendBroadcast(intent);
     }
 
     @Override
     public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+        super.onConnectionStateChange(gatt, status, newState);
+        if (!mConnectionManager.isCurrentGatt(gatt)) {
+            return;
+        }
+
         if (newState == BluetoothProfile.STATE_CONNECTED) {
-            Log.i(LOG_TAG, "S Pen connected");
+            Log.i(LOG_TAG, "SPen connected!");
             mConnectionManager.onConnected();
             gatt.discoverServices();
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-            gatt.disconnect();
-            gatt.close();
-            Log.i(LOG_TAG, "S Pen disconnected");
+            Log.e(LOG_TAG, "SPen disconnected!");
+            mCharging = false;
 
             try {
-                mConnectionManager.connect();
+                mConnectionManager.onDisconnected(gatt);
             } catch (RemoteException ex) {
                 ex.printStackTrace();
             }
@@ -83,30 +100,30 @@ public class SPenGattCallback extends BluetoothGattCallback {
 
     @Override
     public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-        for (BluetoothGattService service : gatt.getServices()) {
-            UUID uuid = service.getUuid();
-            if (SPenIdentity.isSPenService(uuid)) {
-                mServiceUUID = uuid;
-                break;
-            }
+        super.onServicesDiscovered(gatt, status);
+        if (!mConnectionManager.isCurrentGatt(gatt)) {
+            return;
         }
 
-        if (mServiceUUID != null) {
-            Log.i(LOG_TAG, "Found S Pen GATT service: " + mServiceUUID);
+        BluetoothGattService service = gatt.getService(mServiceUUID);
+        if (service != null) {
+            Log.i(LOG_TAG, "Found SPen GATT service: " + mServiceUUID);
             if (mEnableCharacteristics.size() > 0) {
                 Log.i(LOG_TAG, "Enabling characteristic notifications");
                 setCharacteristicNotification(gatt,
-                        gatt.getService(mServiceUUID)
-                                .getCharacteristic(mEnableCharacteristics.get(0)), true);
+                        service.getCharacteristic(mEnableCharacteristics.get(0)), true);
             }
         } else {
-            Log.e(LOG_TAG, "Unable to find S Pen GATT service!");
+            Log.e(LOG_TAG, "Unable to find SPen GATT service!");
         }
     }
 
     @Override
     public void onDescriptorWrite(BluetoothGatt gatt,
             BluetoothGattDescriptor descriptor, int status) {
+        if (!mConnectionManager.isCurrentGatt(gatt)) {
+            return;
+        }
         UUID uuid = descriptor.getCharacteristic().getUuid();
         int index = mEnableCharacteristics.indexOf(uuid);
 
@@ -122,10 +139,65 @@ public class SPenGattCallback extends BluetoothGattCallback {
     @Override
     public void onCharacteristicChanged(BluetoothGatt gatt,
             BluetoothGattCharacteristic characteristic) {
+        super.onCharacteristicChanged(gatt, characteristic);
+        if (!mConnectionManager.isCurrentGatt(gatt)) {
+            return;
+        }
+
         if (characteristic.getUuid().equals(BUTTON_EVENT)) {
-            handleButtonEvent(characteristic.getValue());
+            int type = characteristic.getValue()[0] & 255;
+            ButtonAction button = ButtonAction.fromType(type);
+
+            if (button != null) {
+                switch (button.getAction()) {
+                    case UP:
+                        if (!mButtonHadGesture) {
+                            SPenMode mode = SPenMode.valueOfPref(SettingsUtils.getSwitchPreference(
+                                    mContext, SettingsUtils.SPEN_MODE, "0"));
+                            // Can be used for e.g taking photos
+                            sendEvent(mButtonDownTime, KeyEvent.ACTION_DOWN, mode.getButtonKey());
+                            sendEvent(KeyEvent.ACTION_UP, mode.getButtonKey());
+                        }
+                        mButtonHadGesture = false;
+                        break;
+                    case DOWN:
+                        mButtonDownTime = SystemClock.uptimeMillis();
+                        break;
+                    default:
+                        break;
+                }
+                return;
+            }
+
+            MotionEvent move = MotionEvent.fromTypeData(type, characteristic.getValue());
+
+            if (move != null) {
+                if (Math.abs(move.getDX()) > 500 || Math.abs(move.getDY()) > 500) {
+                    SPenMode mode = SPenMode.valueOfPref(SettingsUtils.getSwitchPreference(
+                            mContext, SettingsUtils.SPEN_MODE, "0"));
+                    if (Math.abs(move.getDX()) > Math.abs(move.getDY())) { // right/left
+                        sendEvent(KeyEvent.ACTION_DOWN, mode.getGestureKey(move.getDX() > 0 ?
+                                SPenDirection.POSITIVE_X : SPenDirection.NEGATIVE_X));
+                        sendEvent(KeyEvent.ACTION_UP, mode.getGestureKey(move.getDX() > 0 ?
+                                SPenDirection.POSITIVE_X : SPenDirection.NEGATIVE_X));
+                    } else { // up/down NOTE: negative Y is actually up while positive Y is down!
+                        sendEvent(KeyEvent.ACTION_DOWN, mode.getGestureKey(move.getDY() > 0 ?
+                                SPenDirection.POSITIVE_Y : SPenDirection.NEGATIVE_Y));
+                        sendEvent(KeyEvent.ACTION_UP, mode.getGestureKey(move.getDY() > 0 ?
+                                SPenDirection.POSITIVE_Y : SPenDirection.NEGATIVE_Y));
+                    }
+                    mButtonHadGesture = true;
+                }
+            }
         } else if (characteristic.getUuid().equals(BATTERY_LEVEL)) {
-            Log.i(LOG_TAG, "Battery level: " + characteristic.getValue()[0]);
+            int battery = characteristic.getValue()[0] & 0xFF;
+            Log.i(LOG_TAG, "Battery level: " + battery);
+            reportBatteryState(battery, mCharging);
+        } else if (characteristic.getUuid().equals(CHARGE_STATUS)) {
+            mCharging = (characteristic.getValue()[0] & 0xFF) != 0;
+            Log.i(LOG_TAG, "Battery charging: " + mCharging);
+            int battery = SettingsUtils.getIntPreference(mContext, SettingsUtils.SPEN_BATTERY_VALUE, -1);
+            reportBatteryState(battery, mCharging);
         } else {
             Log.e(LOG_TAG, "Unknown characteristic: " + characteristic.getUuid());
         }
@@ -142,92 +214,6 @@ public class SPenGattCallback extends BluetoothGattCallback {
                     : BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
             gatt.writeDescriptor(descriptor);
         }
-    }
-
-    private void handleButtonEvent(byte[] data) {
-        if (data == null || data.length == 0) {
-            return;
-        }
-
-        int type = data[0] & 0xFF;
-
-        if (DEBUG) Log.d(LOG_TAG, "BUTTON_EVENT raw: len=" + data.length +
-                " data=" + Arrays.toString(data));
-
-        // Batched packets (newer firmware)
-        if (type == 0xF0 && data.length >= 8) {
-            // Motion records start at offset 2
-            for (int i = 2; i + 5 < data.length; i += 6) {
-                MotionEvent move = MotionEvent.fromData(data, i);
-                handleGesture(move);
-            }
-            return;
-        }
-
-        // Legacy motion handling (for old firmware)
-        if (type == 0x0F && data.length >= 5) {
-            MotionEvent move = MotionEvent.fromData(data, 0);
-            handleGesture(move);
-            return;
-        }
-
-        // Button events (single-byte packets)
-        ButtonAction button = ButtonAction.fromType(type);
-        if (button == null) {
-            Log.w(LOG_TAG, "Unknown BUTTON_EVENT type: " + type);
-            return;
-        }
-
-        switch (button.getAction()) {
-            case DOWN:
-                mButtonDownTime = SystemClock.uptimeMillis();
-                break;
-            case UP:
-                if (!mButtonHadGesture) {
-                    SPenMode mode = SPenMode.valueOfPref(SettingsUtils.getSwitchPreference(
-                            mContext, SettingsUtils.SPEN_MODE, "0"));
-                    // Can be used for e.g taking photos
-                    sendEvent(mButtonDownTime, KeyEvent.ACTION_DOWN, mode.getButtonKey());
-                    sendEvent(KeyEvent.ACTION_UP, mode.getButtonKey());
-                }
-                mButtonHadGesture = false;
-                break;
-            default:
-                break;
-        }
-    }
-
-    private void handleGesture(MotionEvent move) {
-        if (move == null) {
-            return;
-        }
-
-        int key;
-        short dx = move.getDX();
-        short dy = move.getDY();
-
-        if (DEBUG) Log.d(LOG_TAG, "Motion sample dx=" + dx + " dy=" + dy);
-
-        if (Math.abs(dx) <= MOTION_THRESHOLD && Math.abs(dy) <= MOTION_THRESHOLD) {
-            return;
-        }
-
-        SPenMode mode = SPenMode.valueOfPref(SettingsUtils.getSwitchPreference(
-                mContext, SettingsUtils.SPEN_MODE, "0"));
-
-        if (Math.abs(dx) > Math.abs(dy)) { // right/left
-            key = mode.getGestureKey(dx > 0
-                    ? SPenDirection.POSITIVE_X
-                    : SPenDirection.NEGATIVE_X);
-        } else { // up/down (NOTE: negative Y is actually up while positive Y is down!)
-            key = mode.getGestureKey(dy > 0
-                    ? SPenDirection.POSITIVE_Y
-                    : SPenDirection.NEGATIVE_Y);
-        }
-
-        sendEvent(KeyEvent.ACTION_DOWN, key);
-        sendEvent(KeyEvent.ACTION_UP, key);
-        mButtonHadGesture = true;
     }
 
     private boolean sendEvent(long when, int action, int code) {
