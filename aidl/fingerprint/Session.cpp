@@ -82,6 +82,10 @@ void onClientDeath(void* cookie) {
 void Session::setMaskEnabled(bool enabled) {
     std::lock_guard<std::mutex> lock(mMaskMutex);
     if (mMaskEnabled == enabled) return;
+    if (enabled && !mEnrollmentActive &&
+        FingerprintHalProperties::mask_control_enroll_only().value_or(false)) {
+        return;
+    }
     auto path = FingerprintHalProperties::mask_control_path();
     if (!path.has_value() || path->empty()) return;
     if (!::android::base::WriteStringToFile(enabled ? "1" : "0", *path)) {
@@ -89,6 +93,11 @@ void Session::setMaskEnabled(bool enabled) {
         return;
     }
     mMaskEnabled = enabled;
+}
+
+void Session::endEnrollment() {
+    mEnrollmentActive = false;
+    setMaskEnabled(false);
 }
 
 Session::Session(LegacyHAL hal, int userId, std::shared_ptr<ISessionCallback> cb,
@@ -131,8 +140,10 @@ ndk::ScopedAStatus Session::enroll(const HardwareAuthToken& hat,
     hw_auth_token_t authToken;
     translate(hat, authToken);
 
+    mEnrollmentActive = true;
     int32_t error = mHal.ss_fingerprint_enroll(&authToken, mUserId, 0 /* timeoutSec */);
     if (error) {
+        endEnrollment();
         LOG(ERROR) << "ss_fingerprint_enroll failed: " << error;
         mCb->onError(Error::UNABLE_TO_PROCESS, error);
     }
@@ -151,6 +162,7 @@ ndk::ScopedAStatus Session::authenticate(int64_t operationId,
                                          std::shared_ptr<ICancellationSignal>* out) {
     LOG(INFO) << "authenticate";
 
+    if (mEnrollmentActive) endEnrollment();
     int32_t error = mHal.ss_fingerprint_authenticate(operationId, mUserId);
     if (error) {
         LOG(ERROR) << "ss_fingerprint_authenticate failed: " << error;
@@ -245,7 +257,7 @@ ndk::ScopedAStatus Session::resetLockout(const HardwareAuthToken& /*hat*/) {
 }
 
 ndk::ScopedAStatus Session::close() {
-    setMaskEnabled(false);
+    endEnrollment();
     LOG(INFO) << "close";
     mClosed = true;
     mCb->onSessionClosed();
@@ -339,7 +351,7 @@ ndk::ScopedAStatus Session::setIgnoreDisplayTouches(bool /*shouldIgnore*/) {
 }
 
 ndk::ScopedAStatus Session::cancel() {
-    setMaskEnabled(false);
+    endEnrollment();
     int32_t ret = mHal.ss_fingerprint_cancel();
 
     if (ret == 0) {
@@ -470,7 +482,7 @@ void Session::notify(const fingerprint_msg_t* msg) {
             Error result = VendorErrorFilter(msg->data.error, &vendorCode);
             LOG(DEBUG) << "onError(" << static_cast<int>(result) << ")";
 
-            setMaskEnabled(false);
+            endEnrollment();
             mCb->onError(result, vendorCode);
         } break;
         case FINGERPRINT_ACQUIRED: {
@@ -485,16 +497,14 @@ void Session::notify(const fingerprint_msg_t* msg) {
                 const_cast<fingerprint_msg_t*>(msg)->data.enroll.samples_remaining =
                         100 - msg->data.enroll.samples_remaining;
             }
-            if (FingerprintHalProperties::cancel_on_enroll_completion().value_or(false)) {
-                if (msg->data.enroll.samples_remaining == 0) {
-                    mHal.ss_fingerprint_cancel();
-                }
-            }
             LOG(DEBUG) << "onEnrollResult(fid=" << msg->data.enroll.finger.fid
                        << ", gid=" << msg->data.enroll.finger.gid
                        << ", rem=" << msg->data.enroll.samples_remaining << ")";
             if (msg->data.enroll.samples_remaining == 0) {
-                setMaskEnabled(false);
+                endEnrollment();
+                if (FingerprintHalProperties::cancel_on_enroll_completion().value_or(false)) {
+                    mHal.ss_fingerprint_cancel();
+                }
             }
             mCb->onEnrollmentProgress(msg->data.enroll.finger.fid,
                                       msg->data.enroll.samples_remaining);
